@@ -493,7 +493,7 @@ function appendGrRow(i) {
   const box = document.getElementById("gr-rows");
   const row = document.createElement("div");
   row.className = "gr-row";
-  row.innerHTML = '<textarea class="line-input" rows="1" style="flex:1" placeholder="' + (i+1) + 'つめ">' + esc(entry.gratitude[i]) + '</textarea>' +
+  row.innerHTML = '<textarea class="line-input" rows="2" style="flex:1" placeholder="' + (i+1) + 'つめ">' + esc(entry.gratitude[i]) + '</textarea>' +
     (i >= 3 ? '<button class="del-btn" data-del="1">×</button>' : '');
   const ta = row.querySelector("textarea");
   let myIndex = i;
