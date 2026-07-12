@@ -140,6 +140,36 @@
   .h2-mincho { font-family: 'Shippori Mincho', serif; font-size: 15px; font-weight: 700; color: var(--indigo); letter-spacing: .1em; margin: 0 0 8px; }
   .center { text-align: center; }
   .loading { text-align: center; color: var(--ink-soft); padding: 30px 0; }
+
+  /* カレンダー */
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .cal-title { font-family: 'Shippori Mincho', serif; font-size: 16px; font-weight: 700; letter-spacing: .08em; }
+  .cal-week { display: grid; grid-template-columns: repeat(7,1fr); gap: 4px; margin-bottom: 4px; }
+  .cal-week div { text-align: center; font-size: 11px; color: var(--ink-soft); }
+  .cal-week div:first-child { color: var(--vermil); }
+  .cal-week div:last-child { color: var(--indigo); }
+  .cal-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 4px; }
+  .cal-cell {
+    min-height: 56px; border: 1px solid var(--line); border-radius: 8px;
+    background: rgba(255,255,255,.45); padding: 3px 2px;
+    font-family: inherit; cursor: pointer; position: relative;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .cal-cell.blank { border: none; background: none; cursor: default; }
+  .cal-cell.has { background: #fff; }
+  .cal-cell.today { border: 1.5px solid var(--vermil); }
+  .cal-daynum { font-size: 11px; color: var(--ink-soft); }
+  .cal-stamps { display: flex; gap: 2px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  .cal-stamps img { width: 17px; height: 17px; border-radius: 50%; object-fit: cover; }
+  .cal-stamps .kanji { font-family: 'Shippori Mincho', serif; font-size: 12px; font-weight: 700; }
+  .cal-plus { font-size: 10px; color: var(--ink-soft); }
+  .cal-star { position: absolute; top: 1px; right: 3px; font-size: 9px; color: var(--vermil); }
+  .cal-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--indigo-soft); display: inline-block; }
+
+  /* 代表の星 */
+  .right-group { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+  .star-btn { background: none; border: none; cursor: pointer; font-size: 20px; color: #C9B98A; padding: 0 2px; line-height: 1; }
+  .star-btn.on { color: var(--vermil); }
 </style>
 </head>
 <body>
@@ -179,6 +209,8 @@ let entry = emptyEntry();
 let dirty = false;
 let saveTimer = null;
 let activeTab = "today";
+let starUpdaters = [];
+let calMonth = null;
 
 try { config = JSON.parse(localStorage.getItem("kokoro-config") || "null"); } catch(e) {}
 try { store  = JSON.parse(localStorage.getItem("kokoro-cache")  || "{}");   } catch(e) {}
@@ -258,6 +290,7 @@ function loadEntryFor(d) {
       while (ent.moved.length < 3) ent.moved.push({text:"",emotion:null});
       ent.gratitude = (e.gratitude && e.gratitude.length ? e.gratitude : ent.gratitude).slice();
       while (ent.gratitude.length < 3) ent.gratitude.push("");
+      ent.star = e.star || null;
       return ent;
     } catch(err) {}
   }
@@ -275,8 +308,12 @@ async function doSave() {
   const cleaned = {
     moved: entry.moved.filter((m,i) => i < 3 || (m.text && m.text.trim() !== "")),
     gratitude: entry.gratitude.filter((g,i) => i < 3 || (g && g.trim() !== "")),
+    star: null,
     updatedAt: new Date().toISOString()
   };
+  if (entry.star && cleaned.moved.some(m => m.emotion === entry.star)) {
+    cleaned.star = entry.star;
+  }
   const key = currentKey();
   setSaveNote("保存中…");
   try {
@@ -405,6 +442,7 @@ async function connectFromForm() {
 function renderToday() {
   entry = loadEntryFor(currentDate);
   dirty = false;
+  starUpdaters = [];
   const isToday = dateKey(currentDate) === dateKey(new Date());
   let html =
     '<div class="datebar">' +
@@ -465,9 +503,31 @@ function appendMovedRow(i) {
     if (m.emotion) cls = (m.emotion === emo.key) ? "selected" : "dimmed";
     stamps += stampHtml(emo.key, cls);
   });
-  if (i >= 3) stamps += '<button class="del-btn" style="margin-left:auto" data-del="1">×</button>';
-  stamps += '</div>';
+  stamps += '<span class="right-group">' +
+    '<button class="star-btn" data-starbtn title="この日の代表にする" style="display:none">☆</button>' +
+    (i >= 3 ? '<button class="del-btn" data-del="1">×</button>' : '') +
+    '</span></div>';
   row.innerHTML = stamps + '<textarea class="line-input" rows="2" placeholder="' + (i+1) + 'つめ">' + esc(m.text) + '</textarea>';
+
+  const starBtn = row.querySelector("[data-starbtn]");
+  function refreshStar() {
+    if (m.emotion) {
+      starBtn.style.display = "";
+      const on = entry.star && entry.star === m.emotion;
+      starBtn.textContent = on ? "★" : "☆";
+      starBtn.classList.toggle("on", !!on);
+    } else {
+      starBtn.style.display = "none";
+    }
+  }
+  starUpdaters.push(refreshStar);
+  refreshStar();
+  starBtn.addEventListener("click", () => {
+    if (!m.emotion) return;
+    entry.star = (entry.star === m.emotion) ? null : m.emotion;
+    starUpdaters.forEach(f => f());
+    scheduleSave();
+  });
 
   row.querySelectorAll(".stamp").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -476,6 +536,8 @@ function appendMovedRow(i) {
       row.querySelectorAll(".stamp").forEach(b => {
         b.className = "stamp" + (m.emotion ? (b.dataset.emo === m.emotion ? " selected" : " dimmed") : "");
       });
+      if (entry.star && !entry.moved.some(x => x.emotion === entry.star)) entry.star = null;
+      starUpdaters.forEach(f => f());
       scheduleSave();
     });
   });
@@ -485,6 +547,8 @@ function appendMovedRow(i) {
     const idx = entry.moved.indexOf(m);
     if (idx >= 0) entry.moved.splice(idx, 1);
     row.remove();
+    if (entry.star && !entry.moved.some(x => x.emotion === entry.star)) entry.star = null;
+    starUpdaters.forEach(f => f());
     scheduleSave();
   });
   box.appendChild(row);
@@ -512,42 +576,89 @@ function appendGrRow(i) {
   box.appendChild(row);
 }
 
-/* ---- これまで ---- */
+/* ---- これまで（月カレンダー） ---- */
 async function renderList() {
+  if (!calMonth) calMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
   view.innerHTML = '<div class="loading">読み込み中…</div>';
   await loadAll(true);
-  const keys = Object.keys(store).filter(k => k.indexOf("diary:") === 0).sort().reverse();
-  if (keys.length === 0) {
-    view.innerHTML = '<p class="loading">まだ記録がありません。<br>「きょうの記録」から書きはじめましょう。</p>';
-    return;
+  drawCalendar();
+}
+function miniStamp(ek) {
+  const emo = EMOTIONS.find(e => e.key === ek);
+  if (!emo) return "";
+  return images[ek]
+    ? '<img src="' + images[ek] + '" alt="' + emo.label + '">'
+    : '<span class="kanji" style="color:' + emo.color + '">' + emo.label + '</span>';
+}
+function drawCalendar() {
+  const y = calMonth.getFullYear(), mo = calMonth.getMonth();
+  const startDow = new Date(y, mo, 1).getDay();
+  const daysInMonth = new Date(y, mo + 1, 0).getDate();
+  const todayStr = dateKey(new Date());
+
+  let html =
+    '<div class="cal-head">' +
+      '<button class="nav-arrow" id="cal-prev">‹</button>' +
+      '<div class="cal-title">' + y + '年' + (mo + 1) + '月</div>' +
+      '<button class="nav-arrow" id="cal-next">›</button>' +
+    '</div>' +
+    '<div class="cal-week">' + WEEK.map(w => '<div>' + w + '</div>').join('') + '</div>' +
+    '<div class="cal-grid">';
+
+  for (let i = 0; i < startDow; i++) html += '<div class="cal-cell blank"></div>';
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = y + "-" + String(mo + 1).padStart(2, "0") + "-" + String(d).padStart(2, "0");
+    const raw = store["diary:" + ds];
+    let cls = "cal-cell";
+    let inner = '<span class="cal-daynum">' + d + '</span>';
+    if (ds === todayStr) cls += " today";
+
+    if (raw) {
+      let data = null;
+      try { data = JSON.parse(raw); } catch (e) {}
+      if (data) {
+        let emos = [];
+        (data.moved || []).forEach(m => {
+          if (m.emotion && emos.indexOf(m.emotion) < 0) emos.push(m.emotion);
+        });
+        const starred = data.star && emos.indexOf(data.star) >= 0;
+        if (starred) emos = [data.star].concat(emos.filter(e => e !== data.star));
+
+        const hasText =
+          (data.moved || []).some(m => m.text && m.text.trim()) ||
+          (data.gratitude || []).some(g => g && g.trim());
+
+        if (emos.length > 0) {
+          cls += " has";
+          let st = "";
+          emos.slice(0, 2).forEach(ek => { st += miniStamp(ek); });
+          if (emos.length > 2) st += '<span class="cal-plus">+' + (emos.length - 2) + '</span>';
+          inner += '<span class="cal-stamps">' + st + '</span>';
+          if (starred) inner += '<span class="cal-star">★</span>';
+        } else if (hasText) {
+          cls += " has";
+          inner += '<span class="cal-stamps"><span class="cal-dot"></span></span>';
+        }
+      }
+    }
+    html += '<button class="' + cls + '" data-date="' + ds + '">' + inner + '</button>';
   }
-  let html = "";
-  keys.forEach(k => {
-    let data;
-    try { data = JSON.parse(store[k]); } catch(e) { return; }
-    const ds = k.replace("diary:","");
-    const p = ds.split("-").map(Number);
-    const d = new Date(p[0], p[1]-1, p[2]);
-    const emos = [];
-    (data.moved || []).forEach(m => { if (m.emotion && emos.indexOf(m.emotion) < 0) emos.push(m.emotion); });
-    let mini = "";
-    emos.forEach(ek => {
-      const emo = EMOTIONS.find(e => e.key === ek);
-      if (!emo) return;
-      mini += images[ek]
-        ? '<img src="' + images[ek] + '" alt="' + emo.label + '">'
-        : '<span class="kanji" style="color:' + emo.color + '">' + emo.label + '</span>';
-    });
-    const texts = (data.moved || []).map(m => m.text).filter(t => t && t.trim()).join(" ／ ");
-    html += '<button class="card" data-date="' + ds + '">' +
-      '<div class="head"><span class="d">' + fmtDate(d) + '</span><span class="mini">' + mini + '</span></div>' +
-      '<div class="preview">' + esc(texts || "（本文なし）") + '</div></button>';
-  });
+  html += '</div>' +
+    '<p class="muted" style="font-size:12px;margin-top:14px">印はその日に選んだ感情（最大2つ+残り数）。★はその日の代表に指定したしるしです。日付をタップするとその日の記録が開きます。</p>';
+
   view.innerHTML = html;
-  view.querySelectorAll(".card").forEach(c => {
+
+  document.getElementById("cal-prev").addEventListener("click", () => {
+    calMonth = new Date(y, mo - 1, 1); drawCalendar();
+  });
+  document.getElementById("cal-next").addEventListener("click", () => {
+    calMonth = new Date(y, mo + 1, 1); drawCalendar();
+  });
+  view.querySelectorAll(".cal-cell[data-date]").forEach(c => {
     c.addEventListener("click", () => {
       const p = c.dataset.date.split("-").map(Number);
-      currentDate = new Date(p[0], p[1]-1, p[2]);
+      currentDate = new Date(p[0], p[1] - 1, p[2]);
       activeTab = "today";
       render();
     });
